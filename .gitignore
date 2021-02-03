@@ -4,3 +4,4 @@ outputs
 generated_src
 resources
 test.py
+*.pyc
