@@ -1,8 +1,9 @@
 import pandas as pd
 import fasttext
 import csv
+from settings import Settings
 from typing import List
-from utils import FileUtils
+from utils import FileUtils, Logger
 from preprocessor import Preprocessor
 from utils import PandasUtils
 from os import path
@@ -10,15 +11,12 @@ from enum import Enum
 
 
 class BioModel:
-    resource_dir = 'resources/'
-    outputs_dir = 'outputs/'
-    generate_src_dir = 'generated_src/'
-    bios_path = path.join(resource_dir, 'bio.xlsx')
-    inappropriate_bios_path = path.join(resource_dir, 'inappropriate_bios.xlsx')
-    bio_train_path = path.join(generate_src_dir, 'bio.train')
-    bio_test_path = path.join(generate_src_dir, 'bio.test')
-    model_path = path.join(generate_src_dir, 'model_bio.bin')
-    predictions_file = path.join(outputs_dir, 'predictions.csv')
+    bios_path = path.join(Settings.DIRECTORY.RESOURCE_DIR.value, 'bio.xlsx')
+    inappropriate_bios_path = path.join(Settings.DIRECTORY.RESOURCE_DIR.value, 'inappropriate_bios.xlsx')
+    bio_train_path = path.join(Settings.DIRECTORY.GENERATED_SRC_DIR.value, 'bio.train')
+    bio_test_path = path.join(Settings.DIRECTORY.GENERATED_SRC_DIR.value, 'bio.test')
+    model_path = path.join(Settings.DIRECTORY.GENERATED_SRC_DIR.value, 'model_bio.bin')
+    predictions_file = path.join(Settings.DIRECTORY.OUTPUTS_DIR.value, 'predictions.csv')
 
     class ColNames(Enum):
         BIO = 'bio'
@@ -29,6 +27,7 @@ class BioModel:
 
     def __init__(self, number_of_appropriate_bios_records: int = 2000, number_of_training_records: int = 2115,
                  number_of_test_records: int = 0):
+
         self.number_of_appropriate_bios_records = number_of_appropriate_bios_records
         self.inappropriate_bios = FileUtils.read_excel_file(self.inappropriate_bios_path)
         self.number_of_inappropriate_bios_records = len(self.inappropriate_bios.index)
@@ -43,8 +42,12 @@ class BioModel:
         self.model = None
         self.predictions = []
 
-    def __preprocess_dataframe(self):
-        pass
+        Logger.info(
+            "Number of appropriate labeled bios records is : {}".format(self.number_of_appropriate_bios_records))
+        Logger.info(
+            "Number of inappropriate labeled bios records is : {}".format(self.number_of_inappropriate_bios_records))
+        Logger.info("Number of training_records is : {}".format(self.number_of_training_records))
+        Logger.info("Number of test records is : {}".format(self.number_of_test_records))
 
     def __preprocess_appropriate_bios(self):
         self.__add_appropriate_label_for_bio_column()
@@ -80,6 +83,7 @@ class BioModel:
                 self.test_series]
 
     def __generate_training_and_test_series(self):
+        Logger.info("Generating training and test datasets ...")
         self.__preprocess_bios()
         selected_inappropriate = PandasUtils.select_series(self.inappropriate_bios, self.ColNames.BIO.value)
         selected_appropriate = PandasUtils.select_series(self.appropriate_bios, self.ColNames.BIO.value)
@@ -94,6 +98,7 @@ class BioModel:
                                                       ['__label__{}'.format(l.value) for l in self.Label]).tolist()
 
     def train_supervised(self, auto=False, save=False):
+        Logger.info("Training model ...")
         if auto:
             self.model = fasttext.train_supervised(
                 input=self.bio_train_path,
@@ -107,12 +112,15 @@ class BioModel:
             self.model.save_model(self.model_path)
 
     def load_model(self):
+        Logger.info("Loading model ...")
         self.model = fasttext.load_model(self.model_path)
 
     def test(self):
-        print(self.model.test(self.bio_test_path))
+        Logger.info("Testing model ...")
+        Logger.info(self.model.test(self.bio_test_path))
 
     def predict_all(self):
+        Logger.info("Predicting using model ...")
         labels = self.__extract_assigned_labels_from_test_series()
         for i in range(self.number_of_test_records):
             prediction = self.model.predict(self.test_list[i])
@@ -127,6 +135,7 @@ class BioModel:
                 })
 
     def save_results(self):
+        Logger.info("Saving results ...")
         with open(self.predictions_file, mode='w', encoding='utf-8') as csv_file:
             fieldnames = ['bio', 'label', 'predicted_label', 'probability']
             writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
@@ -134,5 +143,3 @@ class BioModel:
 
             for p in self.predictions:
                 writer.writerow(p)
-
-
