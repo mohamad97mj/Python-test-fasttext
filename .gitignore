@@ -1,0 +1,6 @@
+venv
+.idea
+outputs
+generated_src
+resources
+test.py
