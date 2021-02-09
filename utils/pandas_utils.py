@@ -32,14 +32,20 @@ class PandasUtils:
 
     @staticmethod
     def dict_of_lists2dataframe(dic: Dict) -> DataFrame:
-        return DataFrame({k: Series(v) for k, v in dic.items()})
+        data_frame = DataFrame({k: Series(v) for k, v in dic.items()})
+        return data_frame
 
     @staticmethod
-    def apply_function2dataframe(df: DataFrame, f: Callable, columns: List = None) -> None:
+    def apply_function2dataframe(df: DataFrame, f: Callable, columns: List = None) -> DataFrame:
         columns = columns or df.keys()
         dol = PandasUtils.dataframe2dict_of_lists(df)
         for k, v in dol.items():
             if k in columns:
-                dol[k] = map(f, v)
+                dol[k] = [f(i) for i in v]
         return PandasUtils.dict_of_lists2dataframe(dol)
 
+    @staticmethod
+    def apply_function2series(series: Series, f: Callable) -> Series:
+        lst = series.tolist()
+        series = Series([f(i) for i in lst])
+        return series

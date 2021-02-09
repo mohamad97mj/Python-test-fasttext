@@ -10,7 +10,7 @@ from os import path
 from enum import Enum
 
 
-class BioModel:
+class Model:
     bios_path = path.join(Settings.DIRECTORY.RESOURCE_DIR.value, 'bio.xlsx')
     inappropriate_bios_path = path.join(Settings.DIRECTORY.RESOURCE_DIR.value, 'inappropriate_bios.xlsx')
     bio_train_path = path.join(Settings.DIRECTORY.GENERATED_SRC_DIR.value, 'bio.train')
@@ -29,14 +29,16 @@ class BioModel:
                  number_of_test_records: int = 0):
 
         self.number_of_appropriate_bios_records = number_of_appropriate_bios_records
-        self.inappropriate_bios = FileUtils.read_excel_file(self.inappropriate_bios_path)
+        self.inappropriate_bios = PandasUtils.select_series(FileUtils.read_excel_file(self.inappropriate_bios_path),
+                                                            self.ColNames.BIO.value)
         self.number_of_inappropriate_bios_records = len(self.inappropriate_bios.index)
         self.number_of_all_bios_records = self.number_of_appropriate_bios_records + self.number_of_inappropriate_bios_records
         self.number_of_training_records = number_of_training_records
         self.number_of_test_records = min(self.number_of_all_bios_records - self.number_of_training_records,
                                           number_of_test_records) if number_of_test_records else self.number_of_all_bios_records - self.number_of_training_records
         self.bios = FileUtils.read_excel_file(self.bios_path)
-        self.appropriate_bios = self.bios.head(self.number_of_appropriate_bios_records)
+        self.appropriate_bios = PandasUtils.select_series(self.bios.head(self.number_of_appropriate_bios_records),
+                                                          self.ColNames.BIO.value)
 
         self.__generate_training_and_test_series()
         self.model = None
@@ -50,26 +52,36 @@ class BioModel:
         Logger.info("Number of test records is : {}".format(self.number_of_test_records))
 
     def __preprocess_appropriate_bios(self):
-        self.__add_appropriate_label_for_bio_column()
-        PandasUtils.apply_function2dataframe(self.appropriate_bios, Preprocessor.preprocess, [self.ColNames.BIO, ])
+        self.appropriate_bios = PandasUtils.apply_function2series(self.appropriate_bios, Preprocessor.preprocess)
+        self.__add_appropriate_label()
 
     def __preprocess_inappropriate_bios(self):
-        self.__add_inappropriate_label_for_bio_column()
-        PandasUtils.apply_function2dataframe(self.inappropriate_bios, Preprocessor.preprocess, [self.ColNames.BIO, ])
+        self.inappropriate_bios = PandasUtils.apply_function2series(self.inappropriate_bios, Preprocessor.preprocess)
+        self.__add_inappropriate_label()
 
     def __preprocess_bios(self):
+        Logger.info("Preprocessing bios ...")
         self.__preprocess_appropriate_bios()
         self.__preprocess_inappropriate_bios()
 
     @staticmethod
-    def __add_label(df: pd.DataFrame, col_name: str, label: str) -> pd.DataFrame:
+    def __add_label2dataframe(df: pd.DataFrame, col_name: str, label: str) -> pd.DataFrame:
         df[col_name] = '__label__{} '.format(label) + df[col_name].astype(str)
 
-    def __add_appropriate_label_for_bio_column(self) -> pd.DataFrame:
-        self.__add_label(self.appropriate_bios, self.ColNames.BIO.value, self.Label.APPROPRIATE.value)
+    @staticmethod
+    def __add_label2series(series: pd.Series, label: str) -> pd.Series:
+        lst = series.tolist()
+        return pd.Series(['__label__{} '.format(label) + i for i in lst])
 
-    def __add_inappropriate_label_for_bio_column(self) -> pd.DataFrame:
-        self.__add_label(self.inappropriate_bios, self.ColNames.BIO.value, self.Label.INAPPROPRIATE.value)
+    @staticmethod
+    def __add_label(text: str, label: str) -> str:
+        return '__label__{} '.format(label) + text
+
+    def __add_appropriate_label(self):
+        self.appropriate_bios = self.__add_label2series(self.appropriate_bios, self.Label.APPROPRIATE.value)
+
+    def __add_inappropriate_label(self):
+        self.inappropriate_bios = self.__add_label2series(self.inappropriate_bios, self.Label.INAPPROPRIATE.value)
 
     @staticmethod
     def __remove_labels(ser: pd.Series, prefixes: List) -> pd.Series:
@@ -85,9 +97,7 @@ class BioModel:
     def __generate_training_and_test_series(self):
         Logger.info("Generating training and test datasets ...")
         self.__preprocess_bios()
-        selected_inappropriate = PandasUtils.select_series(self.inappropriate_bios, self.ColNames.BIO.value)
-        selected_appropriate = PandasUtils.select_series(self.appropriate_bios, self.ColNames.BIO.value)
-        concatenated = PandasUtils.concat_series([selected_appropriate, selected_inappropriate])
+        concatenated = PandasUtils.concat_series([self.appropriate_bios, self.inappropriate_bios])
         shuffled = PandasUtils.shuffle_series(concatenated)
         self.training_series = shuffled.head(self.number_of_training_records)
         self.test_series = shuffled.tail(self.number_of_test_records)
@@ -97,13 +107,13 @@ class BioModel:
         self.cleaned_test_list = self.__remove_labels(self.test_series,
                                                       ['__label__{}'.format(l.value) for l in self.Label]).tolist()
 
-    def train_supervised(self, auto=False, save=False):
+    def train_supervised(self, auto=False, save=False, duration=120):
         Logger.info("Training model ...")
         if auto:
             self.model = fasttext.train_supervised(
                 input=self.bio_train_path,
                 autotuneValidationFile=self.bio_test_path,
-                autotuneDuration=120
+                autotuneDuration=duration
             )
         else:
             self.model = fasttext.train_supervised(input=self.bio_train_path)
@@ -119,11 +129,22 @@ class BioModel:
         Logger.info("Testing model ...")
         Logger.info(self.model.test(self.bio_test_path))
 
-    def predict_all(self):
+    def my_predict(self, bio: str):
         Logger.info("Predicting using model ...")
+        prediction = self.model.predict(bio)
+        predicted_label = self.Label.APPROPRIATE.value if prediction[0][0] == '__label__{}'.format(
+            self.Label.APPROPRIATE.value) else self.Label.INAPPROPRIATE.value
+        formatted_prediction = {
+            'predicted_label': predicted_label,
+            'probability': prediction[1][0]
+        }
+        return formatted_prediction
+
+    def predict_all(self):
+        Logger.info("Predicting all using model ...")
         labels = self.__extract_assigned_labels_from_test_series()
         for i in range(self.number_of_test_records):
-            prediction = self.model.predict(self.test_list[i])
+            prediction = self.model.predict(self.cleaned_test_list[i])
             predicted_label = self.Label.APPROPRIATE.value if prediction[0][0] == '__label__{}'.format(
                 self.Label.APPROPRIATE.value) else self.Label.INAPPROPRIATE.value
             self.predictions.append(

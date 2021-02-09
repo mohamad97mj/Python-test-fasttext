@@ -1,8 +1,9 @@
 import pandas as pd
 import numpy as np
 import json
+import xlsxwriter
 from utils.my_logger import Logger
-from typing import List
+from typing import List, Tuple
 
 
 class FileUtils:
@@ -36,3 +37,28 @@ class FileUtils:
     def write_series2file(file_path: str, series: pd.Series, fmt: str = '%s', encoding: str = default_encoding) -> None:
         Logger.info('Writing to file {}'.format(file_path))
         np.savetxt(file_path, series.values, fmt=fmt, encoding=encoding)
+
+    @staticmethod
+    def write_lists2excel_file(items: List, path: str, headers: List = None):
+        # Create a workbook and add a worksheet.
+
+        workbook = xlsxwriter.Workbook(path)
+        worksheet = workbook.add_worksheet()
+
+        for i in range(len(headers)):
+            worksheet.write(0, i, headers[i])
+
+        # Some data we want to write to the worksheet.
+
+        # Start from the first cell. Rows and columns are zero indexed.
+        row = 1
+        col = 0
+
+        # Iterate over the data and write it out row by row.
+        for item in items:
+            for i in range(len(item)):
+                worksheet.write(row, col + i, item[i])
+            row += 1
+
+        workbook.close()
+
